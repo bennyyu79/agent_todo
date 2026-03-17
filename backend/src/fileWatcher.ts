@@ -10,6 +10,12 @@ type BroadcastFn = (eventType: string, payload: any) => void;
 const CLAUDE_DIR = path.join(homedir(), '.claude');
 const TEAMS_DIR = path.join(CLAUDE_DIR, 'teams');
 const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
+const INBOXES_DIR = path.join(CLAUDE_DIR, 'inboxes');
+
+// Debug logging
+function debugLog(message: string, ...args: any[]) {
+  console.log('[FileWatcher]', message, ...args);
+}
 
 // Track last known state to avoid duplicate events
 const lastState = new Map<string, string>();
@@ -44,91 +50,139 @@ function parseTaskFile(content: string): any {
 
 export function setupFileWatcher(broadcast: BroadcastFn) {
   // Check if directories exist
+  const existingDirs: string[] = [];
+
   if (!fs.existsSync(CLAUDE_DIR)) {
-    console.log('Claude directory not found at:', CLAUDE_DIR);
-    console.log('Running in simulation mode only');
+    debugLog('Claude directory not found at:', CLAUDE_DIR);
+    debugLog('Running in simulation mode only');
     return;
   }
 
-  console.log('Setting up file watcher for:', CLAUDE_DIR);
-
-  const watcher = chokidar.watch([
-    TEAMS_DIR,
-    TASKS_DIR
-  ], {
-    ignored: /node_modules/,
-    persistent: true,
-    ignoreInitial: true,
-    awaitWriteFinish: {
-      stabilityThreshold: 2000,
-      pollInterval: 100
+  // Check which directories exist and add them to watch list
+  [TEAMS_DIR, TASKS_DIR, INBOXES_DIR].forEach(dir => {
+    if (fs.existsSync(dir)) {
+      existingDirs.push(dir);
+      debugLog('Directory exists and will be watched:', dir);
+    } else {
+      debugLog('Directory does not exist, skipping:', dir);
     }
   });
 
+  if (existingDirs.length === 0) {
+    debugLog('No valid directories to watch, running in simulation mode only');
+    return;
+  }
+
+  debugLog('Setting up file watcher for directories:', existingDirs);
+
+  const watcher = chokidar.watch(
+    existingDirs,
+    {
+      ignored: /node_modules/,
+      ignoreInitial: true,
+      persistent: true,
+      recursive: true, // 递归监听子目录
+      awaitWriteFinish: {
+        stabilityThreshold: 1000,
+        pollInterval: 100
+      },
+      usePolling: false, // 使用原生文件系统事件
+      depth: 99 // 监听深度
+    }
+  );
+
   // Handle team config changes
   watcher.on('change', (filePath) => {
+    debugLog('File changed:', filePath);
+
     if (!filePath.endsWith('.json')) return;
 
-    const content = fs.readFileSync(filePath, 'utf-8');
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
 
-    if (!shouldEmitEvent(filePath, content)) {
-      return;
-    }
-
-    // Team config file
-    if (filePath.includes('/teams/') && filePath.endsWith('/config.json')) {
-      const teamData = parseTeamConfig(content);
-      if (teamData) {
-        console.log('Team config updated:', teamData.name || filePath);
-        broadcast('team_updated', teamData);
+      if (!shouldEmitEvent(filePath, content)) {
+        debugLog('File content unchanged, skipping');
+        return;
       }
-    }
 
-    // Task file changes
-    if (filePath.includes('/tasks/')) {
-      const taskData = parseTaskFile(content);
-      if (taskData) {
-        console.log('Task file updated:', filePath);
-        broadcast('task_updated', taskData);
+      // Team config file - use cross-platform path matching
+      if (filePath.includes('teams') && filePath.endsWith('/config.json')) {
+        const teamData = parseTeamConfig(content);
+        if (teamData) {
+          debugLog('Team config updated:', teamData.name || filePath);
+          broadcast('team_updated', teamData);
+        }
       }
-    }
-
-    // Inbox message files
-    if (filePath.includes('/inboxes/')) {
-      const messageData = parseTaskFile(content);
-      if (messageData) {
-        console.log('Message received in inbox:', filePath);
-        broadcast('message_received', messageData);
+      // Task file changes
+      else if (filePath.includes('tasks') && !filePath.includes('inboxes')) {
+        const taskData = parseTaskFile(content);
+        if (taskData) {
+          debugLog('Task file updated:', filePath);
+          broadcast('task_updated', taskData);
+        }
       }
+      // Inbox message files
+      else if (filePath.includes('inboxes')) {
+        const messageData = parseTaskFile(content);
+        if (messageData) {
+          debugLog('Message received in inbox:', filePath);
+          broadcast('message_received', messageData);
+        }
+      }
+    } catch (error) {
+      debugLog('Error reading file:', filePath, error);
     }
   });
 
   watcher.on('add', (filePath) => {
-    console.log('File added:', filePath);
+    debugLog('File added:', filePath);
 
-    if (filePath.endsWith('.json')) {
+    if (!filePath.endsWith('.json')) return;
+
+    try {
       const content = fs.readFileSync(filePath, 'utf-8');
 
-      if (filePath.includes('/tasks/') && !filePath.includes('/inboxes/')) {
+      // Team config file
+      if (filePath.includes('teams') && filePath.endsWith('/config.json')) {
+        const teamData = parseTeamConfig(content);
+        if (teamData) {
+          debugLog('New team config:', teamData.name);
+          broadcast('team_updated', teamData);
+        }
+      }
+      // Task file
+      else if (filePath.includes('tasks') && !filePath.includes('inboxes')) {
         const taskData = parseTaskFile(content);
         if (taskData) {
+          debugLog('Task created:', filePath);
           broadcast('task_created', taskData);
         }
       }
+      // Inbox message
+      else if (filePath.includes('inboxes')) {
+        const messageData = parseTaskFile(content);
+        if (messageData) {
+          debugLog('New inbox message:', filePath);
+          broadcast('message_received', messageData);
+        }
+      }
+    } catch (error) {
+      debugLog('Error reading new file:', filePath, error);
     }
   });
 
   watcher.on('unlink', (filePath) => {
-    console.log('File removed:', filePath);
+    debugLog('File removed:', filePath);
     lastState.delete(filePath);
   });
 
   watcher.on('error', (error) => {
-    console.error('Watcher error:', error);
+    debugLog('Watcher error:', error);
   });
 
   watcher.on('ready', () => {
-    console.log('File watcher ready');
+    debugLog('File watcher ready');
+    debugLog('Watching directories:', existingDirs);
   });
 
   return watcher;
