@@ -5,6 +5,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { CreateTaskForm } from './components/CreateTaskForm';
 import { TaskModal } from './components/TaskModal';
 import { StatsPanel } from './components/StatsPanel';
+import { DataExplorer } from './components/DataExplorer';
 import { useWebSocket } from './hooks/useWebSocket';
 
 const API_BASE = '/api';
@@ -15,6 +16,7 @@ function App() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'board' | 'data'>('board');
 
   const { connected } = useWebSocket('/ws');
 
@@ -128,6 +130,30 @@ function App() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {/* View Mode Toggle */}
+            <div className="flex bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setViewMode('board')}
+                className={`px-4 py-2 rounded-md transition-colors ${
+                  viewMode === 'board'
+                    ? 'bg-white text-gray-800 shadow'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                看板
+              </button>
+              <button
+                onClick={() => setViewMode('data')}
+                className={`px-4 py-2 rounded-md transition-colors ${
+                  viewMode === 'data'
+                    ? 'bg-white text-gray-800 shadow'
+                    : 'text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                数据浏览器
+              </button>
+            </div>
+
             <div className={`flex items-center gap-2 px-3 py-1 rounded-full ${
               connected ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
             }`}>
@@ -136,12 +162,14 @@ function App() {
               }`} />
               <span className="text-sm">{connected ? '已连接' : '断开连接'}</span>
             </div>
-            <button
-              onClick={() => setShowCreateForm(true)}
-              className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors"
-            >
-              + 新建任务
-            </button>
+            {viewMode === 'board' && (
+              <button
+                onClick={() => setShowCreateForm(true)}
+                className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+              >
+                + 新建任务
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -150,17 +178,23 @@ function App() {
       <StatsPanel tasks={tasks} />
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Board */}
-        <Board
-          tasks={tasks}
-          onTaskStatusChange={handleTaskStatusChange}
-          onTaskClick={handleTaskClick}
-        />
+      {viewMode === 'board' ? (
+        <div className="flex-1 flex overflow-hidden">
+          {/* Board */}
+          <Board
+            tasks={tasks}
+            onTaskStatusChange={handleTaskStatusChange}
+            onTaskClick={handleTaskClick}
+          />
 
-        {/* Chat Panel */}
-        <ChatPanel messages={messages} />
-      </div>
+          {/* Chat Panel */}
+          <ChatPanel messages={messages} />
+        </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <DataExplorer />
+        </div>
+      )}
 
       {/* Create Task Modal */}
       {showCreateForm && (

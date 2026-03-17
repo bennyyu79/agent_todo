@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { applyTaskRoutes } from './routes/tasks';
 import { applyMessageRoutes } from './routes/messages';
+import { applyDataRoutes } from './routes/data';
 import { setupFileWatcher } from './fileWatcher';
 import { startSimulator } from './simulator';
 
@@ -54,6 +55,7 @@ function broadcast(eventType: string, payload: any) {
 // Apply routes
 applyTaskRoutes(app, broadcast);
 applyMessageRoutes(app, broadcast);
+applyDataRoutes(app);
 
 // Health check
 app.get('/health', (req, res) => {
