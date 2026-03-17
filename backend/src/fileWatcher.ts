@@ -48,14 +48,65 @@ function parseTaskFile(content: string): any {
   }
 }
 
+// Load initial data from a directory
+function loadInitialData(directory: string, broadcast: BroadcastFn) {
+  if (!fs.existsSync(directory)) return;
+
+  try {
+    const items = fs.readdirSync(directory);
+
+    for (const item of items) {
+      const itemPath = path.join(directory, item);
+      const stat = fs.statSync(itemPath);
+
+      if (stat.isDirectory()) {
+        // Recursively load subdirectories
+        loadInitialData(itemPath, broadcast);
+      } else if (item.endsWith('.json')) {
+        // Load JSON file
+        const content = fs.readFileSync(itemPath, 'utf-8');
+
+        // Set initial state to avoid re-broadcasting on watch
+        lastState.set(itemPath, Buffer.from(content).toString('base64'));
+
+        // Team config file
+        if (itemPath.includes('teams') && item.endsWith('/config.json')) {
+          const teamData = parseTeamConfig(content);
+          if (teamData) {
+            debugLog('Loaded team config:', teamData.name || itemPath);
+          }
+        }
+        // Task file
+        else if (itemPath.includes('tasks') && !itemPath.includes('inboxes')) {
+          const taskData = parseTaskFile(content);
+          if (taskData) {
+            debugLog('Loaded task:', taskData.subject || itemPath);
+          }
+        }
+        // Inbox message
+        else if (itemPath.includes('inboxes')) {
+          const messageData = parseTaskFile(content);
+          if (messageData) {
+            debugLog('Loaded message:', itemPath);
+            // Broadcast existing messages
+            broadcast('message_received', messageData);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    debugLog('Error loading initial data from', directory, error);
+  }
+}
+
 export function setupFileWatcher(broadcast: BroadcastFn) {
   // Check if directories exist
   const existingDirs: string[] = [];
 
   if (!fs.existsSync(CLAUDE_DIR)) {
     debugLog('Claude directory not found at:', CLAUDE_DIR);
-    debugLog('Running in simulation mode only');
-    return;
+    debugLog('Cannot monitor real data - .claude directory does not exist');
+    return null;
   }
 
   // Check which directories exist and add them to watch list
@@ -69,11 +120,16 @@ export function setupFileWatcher(broadcast: BroadcastFn) {
   });
 
   if (existingDirs.length === 0) {
-    debugLog('No valid directories to watch, running in simulation mode only');
-    return;
+    debugLog('No valid directories to watch (.claude/teams, .claude/tasks, or .claude/inboxes not found)');
+    return null;
   }
 
   debugLog('Setting up file watcher for directories:', existingDirs);
+
+  // Load initial data from all directories
+  debugLog('Loading initial data from .claude directories...');
+  existingDirs.forEach(dir => loadInitialData(dir, broadcast));
+  debugLog('Initial data loading complete');
 
   const watcher = chokidar.watch(
     existingDirs,
@@ -183,6 +239,7 @@ export function setupFileWatcher(broadcast: BroadcastFn) {
   watcher.on('ready', () => {
     debugLog('File watcher ready');
     debugLog('Watching directories:', existingDirs);
+    debugLog('Real-time updates enabled for .claude directory');
   });
 
   return watcher;

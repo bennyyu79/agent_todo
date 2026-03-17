@@ -6,7 +6,6 @@ import { applyTaskRoutes } from './routes/tasks';
 import { applyMessageRoutes } from './routes/messages';
 import { applyDataRoutes } from './routes/data';
 import { setupFileWatcher } from './fileWatcher';
-import { startSimulator } from './simulator';
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,9 +61,17 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', clients: clients.size });
 });
 
-// Start file watcher and simulator
-setupFileWatcher(broadcast);
-startSimulator(broadcast);
+// Start file watcher to monitor real .claude directory
+const fileWatcher = setupFileWatcher(broadcast);
+
+// Load initial data from .claude directory on startup
+if (fileWatcher) {
+  console.log('File watcher is active - monitoring real .claude directory');
+  console.log('Teams, tasks, and messages will be loaded from ~/.claude/');
+} else {
+  console.log('File watcher is not active - .claude directory not found');
+  console.log('Please ensure ~/.claude/teams/ and ~/.claude/tasks/ directories exist');
+}
 
 // Start server
 httpServer.listen(PORT, () => {
