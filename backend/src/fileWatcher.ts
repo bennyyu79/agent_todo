@@ -137,12 +137,10 @@ export function setupFileWatcher(broadcast: BroadcastFn) {
       ignored: /node_modules/,
       ignoreInitial: true,
       persistent: true,
-      recursive: true, // 递归监听子目录
       awaitWriteFinish: {
         stabilityThreshold: 1000,
         pollInterval: 100
       },
-      usePolling: false, // 使用原生文件系统事件
       depth: 99 // 监听深度
     }
   );
