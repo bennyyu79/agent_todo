@@ -44,7 +44,11 @@ interface DataResponse {
   };
 }
 
-export function DataExplorer() {
+interface DataExplorerProps {
+  onTeamSelect?: (team: Team) => void;
+}
+
+export function DataExplorer({ onTeamSelect }: DataExplorerProps) {
   const [data, setData] = useState<DataResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'teams' | 'tasks' | 'messages'>('overview');
@@ -198,18 +202,27 @@ export function DataExplorer() {
               data.teams.map((team) => (
                 <div
                   key={team.id}
-                  onClick={() => setSelectedTeam(team.id === selectedTeam ? null : team.id)}
-                  className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (onTeamSelect) {
+                      onTeamSelect(team);
+                    } else {
+                      setSelectedTeam(team.id === selectedTeam ? null : team.id);
+                    }
+                  }}
+                  className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex-1">
                       <h3 className="font-semibold text-gray-800">{team.name}</h3>
                       {team.description && (
                         <p className="text-sm text-gray-600 mt-1">{team.description}</p>
                       )}
                     </div>
-                    <span className="text-sm text-gray-500">
+                    <span className="text-sm text-gray-500 mr-4">
                       {team.members?.length || 0} 成员
+                    </span>
+                    <span className="text-xs text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                      点击查看看板
                     </span>
                   </div>
                   {selectedTeam === team.id && team.members && (

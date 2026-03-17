@@ -10,6 +10,12 @@ import { useWebSocket } from './hooks/useWebSocket';
 
 const API_BASE = '/api';
 
+interface Team {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -17,6 +23,7 @@ function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'board' | 'data'>('board');
+  const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
 
   const { connected } = useWebSocket('/ws');
 
@@ -55,15 +62,26 @@ function App() {
     return () => ws.close();
   }, []);
 
-  const fetchTasks = async () => {
+  const fetchTasks = async (teamId?: string) => {
     try {
-      const response = await fetch(`${API_BASE}/tasks`);
+      const url = teamId ? `${API_BASE}/data/teams/${teamId}/tasks` : `${API_BASE}/tasks`;
+      const response = await fetch(url);
       const data = await response.json();
       setTasks(data);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTeamMessages = async (teamId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/data/teams/${teamId}/messages`);
+      const data = await response.json();
+      setMessages(data);
+    } catch (error) {
+      console.error('Failed to fetch team messages:', error);
     }
   };
 
@@ -175,7 +193,27 @@ function App() {
       </header>
 
       {/* Stats Panel */}
-      <StatsPanel tasks={tasks} />
+      <div className="bg-white border-b border-gray-200">
+        <StatsPanel tasks={tasks} />
+        {selectedTeam && (
+          <div className="flex items-center justify-between px-6 py-2 bg-blue-50 border-t border-blue-100">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium text-blue-800">当前团队:</span>
+              <span className="px-3 py-1 bg-blue-500 text-white rounded-full text-sm">{selectedTeam.name}</span>
+            </div>
+            <button
+              onClick={() => {
+                setSelectedTeam(null);
+                fetchTasks();
+                fetchMessages();
+              }}
+              className="text-sm text-blue-600 hover:text-blue-800 underline"
+            >
+              清除过滤器
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Main Content */}
       {viewMode === 'board' ? (
@@ -192,7 +230,12 @@ function App() {
         </div>
       ) : (
         <div className="flex-1 overflow-hidden">
-          <DataExplorer />
+          <DataExplorer onTeamSelect={(team) => {
+            setSelectedTeam(team);
+            setViewMode('board');
+            fetchTasks(team.id);
+            fetchTeamMessages(team.id);
+          }} />
         </div>
       )}
 
