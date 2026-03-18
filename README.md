@@ -12,6 +12,10 @@
 - **任务详情**: 点击任务查看详细信息
 - **过滤器**: 按关键词和负责人筛选任务
 - **统计面板**: 实时显示任务统计和完成率
+- **团队选择**: 下拉选择查看特定团队的任务和消息
+- **数据浏览器**: 浏览所有团队和数据
+- **成员过滤**: 点击团队成员查看该成员的任务和 inbox 消息
+- **成员消息过滤**: 点击成员后，聊天面板只显示该成员 inbox 文件中的消息
 
 ## 技术栈
 
@@ -27,13 +31,14 @@ agent_todo/
 ├── frontend/                 # React 前端
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Board.tsx          # 看板组件
+│   │   │   ├── Board.tsx          # 看板组件 (支持成员过滤)
 │   │   │   ├── TaskCard.tsx       # 任务卡片
 │   │   │   ├── ChatPanel.tsx      # 聊天面板
 │   │   │   ├── MessageBubble.tsx  # 消息气泡
 │   │   │   ├── CreateTaskForm.tsx # 创建任务表单
 │   │   │   ├── TaskModal.tsx      # 任务详情弹窗
-│   │   │   └── StatsPanel.tsx     # 统计面板
+│   │   │   ├── StatsPanel.tsx     # 统计面板
+│   │   │   └── DataExplorer.tsx   # 数据浏览器组件
 │   │   ├── hooks/
 │   │   │   └── useWebSocket.ts    # WebSocket 钩子
 │   │   ├── types/
@@ -46,7 +51,8 @@ agent_todo/
 │   │   ├── server.ts          # Express + WebSocket 服务器
 │   │   ├── routes/
 │   │   │   ├── tasks.ts       # 任务 API
-│   │   │   └── messages.ts    # 消息 API
+│   │   │   ├── messages.ts    # 消息 API
+│   │   │   └── data.ts        # 数据 API (团队、任务、消息)
 │   │   ├── fileWatcher.ts     # 文件监听器
 │   │   └── simulator.ts       # Agent 对话模拟器
 │   └── package.json
@@ -82,6 +88,8 @@ npm run dev:frontend  # 前端开发服务器 (端口 5173)
 
 ## API 端点
 
+### 任务 API
+
 | 方法 | 路径 | 描述 |
 |------|------|------|
 | GET | /api/tasks | 获取所有任务 |
@@ -89,8 +97,32 @@ npm run dev:frontend  # 前端开发服务器 (端口 5173)
 | POST | /api/tasks | 创建新任务 |
 | PUT | /api/tasks/:id | 更新任务 |
 | DELETE | /api/tasks/:id | 删除任务 |
+
+### 消息 API
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
 | GET | /api/messages/recent | 获取最近消息 |
 | GET | /api/messages/team/:teamId | 获取团队消息 |
+| GET | /api/messages/team/:teamId?memberName=:name | 获取团队中特定成员的消息 |
+
+### 数据 API
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
+| GET | /api/data/teams | 获取所有团队 |
+| GET | /api/data/teams/:teamId | 获取单个团队 |
+| GET | /api/data/teams/:teamId/tasks | 获取团队任务 |
+| GET | /api/data/teams/:teamId/messages | 获取团队消息 |
+| GET | /api/data/teams/:teamId/messages?memberName=:name | 获取团队中特定成员的 inbox 消息 |
+| GET | /api/data/tasks/all | 获取所有任务 |
+| GET | /api/data/inboxes/all | 获取所有 inbox 消息 |
+| GET | /api/data/all | 获取所有数据 (团队、任务、消息) |
+
+### 其他
+
+| 方法 | 路径 | 描述 |
+|------|------|------|
 | GET | /health | 健康检查 |
 | WS | /ws | WebSocket 实时连接 |
 
@@ -118,6 +150,28 @@ npm run dev:frontend  # 前端开发服务器 (端口 5173)
 ## 真实集成
 
 应用可以监听实际的 `~/.claude/teams/` 和 `~/.claude/tasks/` 目录，显示真实的 Agent Teams 通信。如果目录不存在，将自动使用模拟模式。
+
+### 团队结构
+
+```
+~/.claude/teams/<team-name>/
+├── config.json              # 团队配置 (包含成员列表)
+├── inboxes/                 # 成员收件箱
+│   ├── team-lead.json       # 团队负责人收到的消息
+│   ├── backend-dev.json     # 后端开发收到的消息
+│   ├── frontend-dev.json    # 前端开发收到的消息
+│   └── ...                  # 其他成员的消息
+└── tasks/                   # 团队任务目录
+    └── <task-id>/
+        └── <task-file>.json
+```
+
+### 消息过滤
+
+- **团队过滤**: 点击团队选择器或数据浏览器中的团队，显示该团队的所有任务和消息
+- **成员过滤**: 点击看板中的成员头像，显示该成员的任务和 inbox 消息
+- **inbox 消息**: 每个成员的 inbox 文件 (`~/.claude/teams/<team>/inboxes/<member>.json`) 存储该成员收到的所有消息
+- **成员点击行为**: 点击成员后，聊天面板只显示该成员 inbox 文件中的消息，不会显示其他成员的消息
 
 ## 开发说明
 
