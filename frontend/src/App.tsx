@@ -8,27 +8,37 @@ import { StatsPanel } from './components/StatsPanel';
 import { DataExplorer } from './components/DataExplorer';
 import { useWebSocket } from './hooks/useWebSocket';
 
-const API_BASE = '/api';
+const API_BASE = 'http://localhost:3001/api';
+
+interface TeamMember {
+  name: string;
+  agentId: string;
+  agentType: string;
+}
 
 interface Team {
   id: string;
   name: string;
   description?: string;
+  members?: TeamMember[];
 }
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'board' | 'data'>('board');
   const [selectedTeam, setSelectedTeam] = useState<Team | null>(null);
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
   const { connected } = useWebSocket('/ws');
 
-  // Fetch tasks on mount
+  // Fetch data on mount
   useEffect(() => {
+    fetchTeams();
     fetchTasks();
     fetchMessages();
   }, []);
@@ -42,14 +52,40 @@ function App() {
         switch (data.type) {
           case 'task_created':
           case 'task_updated':
-            await fetchTasks();
+            if (selectedTeam) {
+              await fetchTasks(selectedTeam.id);
+            } else {
+              await fetchTasks();
+            }
             break;
           case 'task_deleted':
             setTasks(prev => prev.filter(t => t.id !== data.payload.id));
             break;
-          case 'message_received':
-            setMessages(prev => [...prev, data.payload].slice(-100));
+          case 'message_received': {
+            // Check if the new message belongs to the current team and member filter
+            const newMessage = data.payload;
+            const shouldAddMessage = () => {
+              // If no team selected, add all messages
+              if (!selectedTeam) {
+                return true;
+              }
+              // If team selected but no member filter, add messages for this team
+              if (!selectedMember) {
+                return newMessage.teamId === selectedTeam.id;
+              }
+              // If member filter is active, only add messages for this member's inbox
+              return newMessage.teamId === selectedTeam.id &&
+                     newMessage.inboxMemberName === selectedMember;
+            };
+
+            if (shouldAddMessage()) {
+              setMessages(prev => [...prev, newMessage].slice(-100));
+              console.log(`[WebSocket] Added message from ${newMessage.sender} to ${newMessage.inboxMemberName}'s inbox`);
+            } else {
+              console.log(`[WebSocket] Skipped message (team: ${newMessage.teamId}, inbox: ${newMessage.inboxMemberName}, filter: ${selectedTeam?.name}/${selectedMember})`);
+            }
             break;
+          }
         }
       } catch (e) {
         console.error('Failed to handle WebSocket message:', e);
@@ -60,14 +96,27 @@ function App() {
     ws.onmessage = handleWebSocketMessage;
 
     return () => ws.close();
-  }, []);
+  }, [selectedTeam, selectedMember]);
+
+  const fetchTeams = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/data/teams`);
+      const data = await response.json();
+      setTeams(data);
+      console.log(`Loaded ${data.length} teams`);
+    } catch (error) {
+      console.error('Failed to fetch teams:', error);
+    }
+  };
 
   const fetchTasks = async (teamId?: string) => {
     try {
+      // Use real data from .claude directory
       const url = teamId ? `${API_BASE}/data/teams/${teamId}/tasks` : `${API_BASE}/tasks`;
       const response = await fetch(url);
       const data = await response.json();
       setTasks(data);
+      console.log(`Loaded ${data.length} tasks${teamId ? ` for team ${teamId}` : ''}`);
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
     } finally {
@@ -75,11 +124,41 @@ function App() {
     }
   };
 
-  const fetchTeamMessages = async (teamId: string) => {
+  const fetchTeamMessages = async (teamId: string, memberName?: string) => {
     try {
-      const response = await fetch(`${API_BASE}/data/teams/${teamId}/messages`);
+      // Clear existing messages first to avoid duplicate keys
+      setMessages([]);
+
+      // Pass memberName to backend API for filtering
+      const url = memberName
+        ? `${API_BASE}/data/teams/${teamId}/messages?memberName=${encodeURIComponent(memberName)}`
+        : `${API_BASE}/data/teams/${teamId}/messages`;
+
+      const response = await fetch(url);
       const data = await response.json();
-      setMessages(data);
+      console.log(`[fetchTeamMessages] Fetched ${data.length} messages for team ${teamId}${memberName ? ` (member: ${memberName})` : ''}`);
+
+      // Transform the data to ChatMessage format
+      const messages = data.map((msg: any) => {
+        // Extract inbox file name from path (e.g., "team-lead.json" from "/path/to/inboxes/team-lead.json")
+        const inboxFileName = msg.path ? msg.path.split('/').pop() || '' : '';
+        const inboxMemberName = inboxFileName.replace('.json', '');
+
+        return {
+          id: msg.path || Math.random().toString(36),
+          sender: msg.from || 'unknown',
+          senderType: msg.from === 'team-lead' ? 'lead' : 'agent',
+          content: msg.text || '',
+          timestamp: msg.timestamp || new Date().toISOString(),
+          teamId: msg.teamId || teamId,
+          isProtocol: msg.text && msg.text.startsWith('{'),
+          color: msg.color,
+          inboxMemberName: inboxMemberName // Add inbox member name for filtering
+        };
+      });
+
+      setMessages(messages);
+      console.log(`[fetchTeamMessages] Final: ${messages.length} messages${memberName ? ` for member ${memberName}` : ''} in team ${teamId}`);
     } catch (error) {
       console.error('Failed to fetch team messages:', error);
     }
@@ -87,9 +166,28 @@ function App() {
 
   const fetchMessages = async () => {
     try {
-      const response = await fetch(`${API_BASE}/messages/recent/100`);
+      // Use real data from .claude directory via data API
+      const response = await fetch(`${API_BASE}/data/inboxes/all`);
       const data = await response.json();
-      setMessages(data);
+      // Transform the data to ChatMessage format
+      const messages = data.map((msg: any) => {
+        // Extract inbox file name from path
+        const inboxFileName = msg.path ? msg.path.split('/').pop() || '' : '';
+        const inboxMemberName = inboxFileName.replace('.json', '');
+        return {
+          id: msg.path || Math.random().toString(36),
+          sender: msg.from || 'unknown',
+          senderType: msg.from === 'team-lead' ? 'lead' : 'agent',
+          content: msg.text || '',
+          timestamp: msg.timestamp || new Date().toISOString(),
+          teamId: msg.teamId || 'default',
+          isProtocol: msg.text && msg.text.startsWith('{'),
+          color: msg.color,
+          inboxMemberName: inboxMemberName
+        };
+      });
+      setMessages(messages);
+      console.log(`Loaded ${messages.length} messages from real inbox files`);
     } catch (error) {
       console.error('Failed to fetch messages:', error);
     }
@@ -148,6 +246,36 @@ function App() {
             </p>
           </div>
           <div className="flex items-center gap-4">
+            {/* Team Selector */}
+            <select
+              value={selectedTeam?.id || ''}
+              onChange={(e) => {
+                const teamId = e.target.value;
+                if (teamId) {
+                  const team = teams.find(t => t.id === teamId);
+                  if (team) {
+                    setSelectedTeam(team);
+                    setSelectedMember(null); // Reset member selection when switching teams
+                    fetchTasks(teamId);
+                    fetchTeamMessages(teamId);
+                  }
+                } else {
+                  setSelectedTeam(null);
+                  setSelectedMember(null);
+                  fetchTasks();
+                  fetchMessages();
+                }
+              }}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">所有团队</option>
+              {teams.map(team => (
+                <option key={team.id} value={team.id}>
+                  {team.name} ({team.members?.length || 0} 成员)
+                </option>
+              ))}
+            </select>
+
             {/* View Mode Toggle */}
             <div className="flex bg-gray-100 rounded-lg p-1">
               <button
@@ -200,17 +328,40 @@ function App() {
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-blue-800">当前团队:</span>
               <span className="px-3 py-1 bg-blue-500 text-white rounded-full text-sm">{selectedTeam.name}</span>
+              {selectedMember && (
+                <>
+                  <span className="text-sm font-medium text-purple-800">当前成员:</span>
+                  <span className="px-3 py-1 bg-purple-500 text-white rounded-full text-sm">{selectedMember}</span>
+                </>
+              )}
             </div>
-            <button
-              onClick={() => {
-                setSelectedTeam(null);
-                fetchTasks();
-                fetchMessages();
-              }}
-              className="text-sm text-blue-600 hover:text-blue-800 underline"
-            >
-              清除过滤器
-            </button>
+            <div className="flex gap-2">
+              {selectedMember && (
+                <button
+                  onClick={() => {
+                    setSelectedMember(null);
+                    if (selectedTeam) {
+                      fetchTasks(selectedTeam.id);
+                      fetchTeamMessages(selectedTeam.id);
+                    }
+                  }}
+                  className="text-sm text-purple-600 hover:text-purple-800 underline"
+                >
+                  清除成员过滤器
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setSelectedTeam(null);
+                  setSelectedMember(null);
+                  fetchTasks();
+                  fetchMessages();
+                }}
+                className="text-sm text-blue-600 hover:text-blue-800 underline"
+              >
+                清除团队过滤器
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -221,8 +372,26 @@ function App() {
           {/* Board */}
           <Board
             tasks={tasks}
+            members={selectedTeam?.members || undefined}
             onTaskStatusChange={handleTaskStatusChange}
             onTaskClick={handleTaskClick}
+            onMemberClick={(memberName) => {
+              console.log(`[Board] onMemberClick called with: ${memberName}, selectedTeam: ${selectedTeam?.name}`);
+              setSelectedMember(memberName);
+              if (selectedTeam) {
+                // When clicking a member, filter tasks by that member
+                if (memberName) {
+                  const filteredTasks = tasks.filter(t => t.owner === memberName);
+                  setTasks(filteredTasks);
+                  console.log(`[Board] Filtered tasks from ${tasks.length} to ${filteredTasks.length} for member ${memberName}`);
+                } else {
+                  // Reset to all tasks for the team
+                  fetchTasks(selectedTeam.id);
+                }
+                // Fetch messages for that member (messages sent TO that member)
+                fetchTeamMessages(selectedTeam.id, memberName || undefined);
+              }
+            }}
           />
 
           {/* Chat Panel */}
@@ -232,6 +401,7 @@ function App() {
         <div className="flex-1 overflow-hidden">
           <DataExplorer onTeamSelect={(team) => {
             setSelectedTeam(team);
+            setSelectedMember(null); // Reset member selection when switching teams
             setViewMode('board');
             fetchTasks(team.id);
             fetchTeamMessages(team.id);

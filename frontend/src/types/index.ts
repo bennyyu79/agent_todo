@@ -14,17 +14,19 @@ export interface Task {
   blockedBy?: string[];
   createdAt: string;
   updatedAt: string;
+  teamId?: string; // Team association for tasks loaded from .claude directory
 }
 
 export interface ChatMessage {
   id: string;
   sender: string;
-  senderType: 'agent' | 'user' | 'system';
+  senderType: 'agent' | 'lead' | 'user' | 'system';
   content: string;
   timestamp: string;
   teamId: string;
   isProtocol?: boolean;
-  agentColor?: string;
+  color?: string; // Optional color for visual distinction
+  inboxMemberName?: string; // Name of the member who received this message (inbox file name)
 }
 
 export interface ColumnType {

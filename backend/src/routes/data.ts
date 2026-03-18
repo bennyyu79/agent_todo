@@ -8,7 +8,7 @@ const router = Router();
 const CLAUDE_DIR = path.join(homedir(), '.claude');
 const TEAMS_DIR = path.join(CLAUDE_DIR, 'teams');
 const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
-const INBOXES_DIR = path.join(CLAUDE_DIR, 'inboxes');
+// Note: inboxes are inside each team directory, not at the root level
 
 interface TeamConfig {
   name: string;
@@ -32,6 +32,7 @@ interface TaskData {
   blocks?: string[];
   createdAt?: string;
   updatedAt?: string;
+  teamId?: string; // Added: team ID association
 }
 
 // Helper function to read JSON file safely
@@ -75,9 +76,9 @@ function readAllTeams(): Array<TeamConfig & { id: string; path: string }> {
   return teams;
 }
 
-// Helper function to read all tasks
-function readAllTasks(): TaskData[] {
-  const tasks: TaskData[] = [];
+// Helper function to read all tasks with team association
+function readAllTasks(): (TaskData & { teamId: string })[] {
+  const tasks: (TaskData & { teamId: string })[] = [];
 
   if (!fs.existsSync(TASKS_DIR)) {
     return tasks;
@@ -92,15 +93,20 @@ function readAllTasks(): TaskData[] {
       // Read all JSON files in the task directory
       const files = fs.readdirSync(taskPath);
       for (const file of files) {
-        if (file.endsWith('.json')) {
-          const filePath = path.join(taskPath, file);
-          const taskData = readJsonFile(filePath);
-          if (taskData) {
-            tasks.push({
-              ...taskData,
-              id: taskData.id || `${taskDir}-${file}`
-            });
-          }
+        // Skip .lock files and .highwatermark files
+        if (file.startsWith('.') || !file.endsWith('.json')) {
+          continue;
+        }
+
+        const filePath = path.join(taskPath, file);
+        const taskData = readJsonFile(filePath);
+        if (taskData && taskData.subject) {
+          tasks.push({
+            ...taskData,
+            id: taskData.id || `${taskDir}-${file}`,
+            owner: taskData.owner || 'team-lead', // Default to team-lead if not specified
+            teamId: taskDir // Associate task with team directory name
+          });
         }
       }
     }
@@ -109,31 +115,46 @@ function readAllTasks(): TaskData[] {
   return tasks;
 }
 
-// Helper function to read all inbox messages
+// Helper function to read all inbox messages from all teams
 function readAllInboxes(): Array<any & { teamId: string; path: string }> {
   const messages: Array<any & { teamId: string; path: string }> = [];
 
-  if (!fs.existsSync(INBOXES_DIR)) {
+  if (!fs.existsSync(TEAMS_DIR)) {
     return messages;
   }
 
-  const inboxDirs = fs.readdirSync(INBOXES_DIR);
+  const teamDirs = fs.readdirSync(TEAMS_DIR);
 
-  for (const inboxDir of inboxDirs) {
-    const inboxPath = path.join(INBOXES_DIR, inboxDir);
+  for (const teamDir of teamDirs) {
+    const teamPath = path.join(TEAMS_DIR, teamDir);
+    const inboxesPath = path.join(teamPath, 'inboxes');
 
-    if (fs.statSync(inboxPath).isDirectory()) {
-      const files = fs.readdirSync(inboxPath);
+    // Check if this is a directory and has an inboxes subdirectory
+    if (fs.statSync(teamPath).isDirectory() && fs.existsSync(inboxesPath)) {
+      const files = fs.readdirSync(inboxesPath);
       for (const file of files) {
         if (file.endsWith('.json')) {
-          const filePath = path.join(inboxPath, file);
+          const filePath = path.join(inboxesPath, file);
           const messageData = readJsonFile(filePath);
           if (messageData) {
-            messages.push({
-              ...messageData,
-              teamId: inboxDir,
-              path: filePath
-            });
+            // messageData can be an array (inbox file) or a single message object
+            if (Array.isArray(messageData)) {
+              // Inbox file contains an array of messages
+              messageData.forEach(msg => {
+                messages.push({
+                  ...msg,
+                  teamId: teamDir,
+                  path: filePath
+                });
+              });
+            } else {
+              // Single message object
+              messages.push({
+                ...messageData,
+                teamId: teamDir,
+                path: filePath
+              });
+            }
           }
         }
       }
@@ -201,35 +222,30 @@ router.get('/teams/:teamId', (req: Request, res: Response) => {
 router.get('/teams/:teamId/tasks', (req: Request, res: Response) => {
   const { teamId } = req.params;
   const allTasks = readAllTasks();
-  const teamConfig = readJsonFile(path.join(TEAMS_DIR, teamId, 'config.json'));
 
-  // If team has members, filter tasks by member names
-  if (teamConfig?.members) {
-    const memberNames = teamConfig.members.map((m: any) => m.name);
-    const teamTasks = allTasks.filter(task =>
-      memberNames.some(name =>
-        task.owner === name ||
-        task.subject?.includes(name) ||
-        task.description?.includes(name)
-      )
-    );
-    res.json(teamTasks);
-  } else {
-    // If no members defined, return all tasks for this team directory
-    const teamTasks = allTasks.filter(task =>
-      task.owner === teamId ||
-      task.description?.includes(teamId) ||
-      task.subject?.includes(teamId)
-    );
-    res.json(teamTasks);
-  }
+  // Filter tasks by teamId field (which corresponds to task directory name)
+  const teamTasks = allTasks.filter(task => task.teamId === teamId);
+  res.json(teamTasks);
 });
 
-// GET messages for a specific team
+// GET messages for a specific team (optionally filtered by member)
 router.get('/teams/:teamId/messages', (req: Request, res: Response) => {
   const { teamId } = req.params;
+  const memberName = req.query.memberName as string | undefined;
+
   const allMessages = readAllInboxes();
-  const teamMessages = allMessages.filter(msg => msg.teamId === teamId);
+  let teamMessages = allMessages.filter(msg => msg.teamId === teamId);
+
+  // If memberName is specified, filter messages to only include those in the member's inbox
+  if (memberName) {
+    teamMessages = teamMessages.filter(msg => {
+      // Extract inbox member name from path (e.g., "team-lead" from "/path/to/inboxes/team-lead.json")
+      const inboxFileName = msg.path ? msg.path.split('/').pop() || '' : '';
+      const inboxMemberName = inboxFileName.replace('.json', '');
+      return inboxMemberName === memberName;
+    });
+  }
+
   res.json(teamMessages);
 });
 

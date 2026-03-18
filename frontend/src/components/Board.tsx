@@ -3,13 +3,51 @@ import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautif
 import { Task, TaskStatus, COLUMNS } from '../types';
 import { TaskCard } from './TaskCard';
 
-interface BoardProps {
-  tasks: Task[];
-  onTaskStatusChange: (taskId: string, newStatus: TaskStatus) => void;
-  onTaskClick: (task: Task) => void;
+interface TeamMember {
+  name: string;
+  agentId: string;
+  agentType: string;
 }
 
-export function Board({ tasks, onTaskStatusChange, onTaskClick }: BoardProps) {
+interface BoardProps {
+  tasks: Task[];
+  members?: TeamMember[]; // Team members from config.json
+  onTaskStatusChange: (taskId: string, newStatus: TaskStatus) => void;
+  onTaskClick: (task: Task) => void;
+  onMemberClick?: (memberName: string | null) => void; // Callback when clicking on a member
+}
+
+// Member color mapping for avatars
+const memberColors: Record<string, string> = {
+  'team-lead': 'bg-purple-500',
+  'backend-dev': 'bg-green-500',
+  'frontend-dev': 'bg-blue-500',
+  'tester': 'bg-red-500',
+  'architect': 'bg-indigo-500',
+  'tech-architect': 'bg-cyan-500',
+  'technical-architect': 'bg-cyan-500',
+  'ux-designer': 'bg-pink-500',
+  'ux-researcher': 'bg-rose-500',
+  'ux-analyst': 'bg-orange-500',
+  'ux-explorer': 'bg-amber-500',
+  'devil-advocate': 'bg-slate-600',
+  'devils-advocate': 'bg-slate-600',
+  'critic': 'bg-gray-600',
+  'skeptical-reviewer': 'bg-zinc-600',
+  'integrator': 'bg-emerald-500',
+  'local-investigator': 'bg-violet-500',
+  'pr-investigator': 'bg-fuchsia-500',
+  'external-investigator': 'bg-lime-500',
+  'observer': 'bg-teal-500',
+  'teammate': 'bg-gray-400',
+  default: 'bg-gray-500'
+};
+
+const getMemberColor = (member: string) => {
+  return memberColors[member] || memberColors.default;
+};
+
+export function Board({ tasks, members, onTaskStatusChange, onTaskClick, onMemberClick }: BoardProps) {
   const [localTasks, setLocalTasks] = useState<Task[]>(tasks);
   const [filterText, setFilterText] = useState('');
   const [filterOwner, setFilterOwner] = useState<string>('all');
@@ -18,8 +56,18 @@ export function Board({ tasks, onTaskStatusChange, onTaskClick }: BoardProps) {
     setLocalTasks(tasks);
   }, [tasks]);
 
-  // Get unique owners for filter
-  const owners = Array.from(new Set(tasks.map(t => t.owner || 'unassigned')));
+  // Get unique owners (members) for filter and display
+  // Priority: use members from team config, fallback to task owners
+  const ownersFromConfig = members?.map(m => m.name) || [];
+  const ownersFromTasks = Array.from(new Set(tasks.map(t => t.owner || 'unassigned')));
+  // Combine both: all config members + any task owners not in config
+  const owners = Array.from(new Set([...ownersFromConfig, ...ownersFromTasks]));
+
+  // Calculate task count per member
+  const memberTaskCounts = owners.reduce((acc, owner) => {
+    acc[owner] = tasks.filter(t => t.owner === owner).length;
+    return acc;
+  }, {} as Record<string, number>);
 
   // Filter tasks
   const filteredTasks = localTasks.filter(task => {
@@ -54,9 +102,9 @@ export function Board({ tasks, onTaskStatusChange, onTaskClick }: BoardProps) {
 
   return (
     <div className="flex-1 flex flex-col">
-      {/* Filter Bar */}
+      {/* Filter Bar with Member Stats */}
       <div className="p-4 bg-white border-b border-gray-200">
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap items-center">
           <input
             type="text"
             placeholder="搜索任务..."
@@ -76,6 +124,38 @@ export function Board({ tasks, onTaskStatusChange, onTaskClick }: BoardProps) {
               </option>
             ))}
           </select>
+
+          {/* Member Stats */}
+          <div className="flex gap-2 ml-auto">
+            {owners.map(owner => {
+              const isTeamLead = owner === 'team-lead';
+              return (
+                <div
+                  key={owner}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer ${
+                    filterOwner === owner ? 'ring-2 ring-blue-500' : ''
+                  } hover:bg-gray-100`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFilterOwner(owner);
+                    if (onMemberClick && owner !== 'unassigned') {
+                      onMemberClick(owner);
+                    }
+                  }}
+                >
+                  <div className={`w-6 h-6 rounded-full ${getMemberColor(owner)} flex items-center justify-center text-white text-xs font-bold`}>
+                    {isTeamLead ? '👑' : owner.substring(0, 2).toUpperCase()}
+                  </div>
+                  <span className={`text-xs ${isTeamLead ? 'font-semibold text-purple-700' : 'text-gray-600'}`}>
+                    {owner === 'unassigned' ? '未分配' : owner}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    ({memberTaskCounts[owner] || 0})
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 

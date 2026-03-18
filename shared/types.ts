@@ -14,6 +14,7 @@ export interface Task {
   blockedBy?: string[];
   createdAt: string;
   updatedAt: string;
+  teamId?: string; // Team association for tasks loaded from .claude directory
 }
 
 export interface Team {
@@ -48,11 +49,12 @@ export interface ProtocolMessage {
 export interface ChatMessage {
   id: string;
   sender: string;
-  senderType: 'agent' | 'user' | 'system';
+  senderType: 'agent' | 'lead' | 'user' | 'system';
   content: string;
   timestamp: string;
   teamId: string;
   isProtocol?: boolean;
+  color?: string; // Optional color for visual distinction
 }
 
 export interface WebSocketEvent {
