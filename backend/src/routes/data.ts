@@ -201,11 +201,28 @@ router.get('/teams/:teamId', (req: Request, res: Response) => {
 router.get('/teams/:teamId/tasks', (req: Request, res: Response) => {
   const { teamId } = req.params;
   const allTasks = readAllTasks();
-  // Filter tasks by team (assuming task has owner or team reference)
-  const teamTasks = allTasks.filter(task =>
-    task.owner === teamId || task.description?.includes(teamId)
-  );
-  res.json(teamTasks);
+  const teamConfig = readJsonFile(path.join(TEAMS_DIR, teamId, 'config.json'));
+
+  // If team has members, filter tasks by member names
+  if (teamConfig?.members) {
+    const memberNames = teamConfig.members.map((m: any) => m.name);
+    const teamTasks = allTasks.filter(task =>
+      memberNames.some(name =>
+        task.owner === name ||
+        task.subject?.includes(name) ||
+        task.description?.includes(name)
+      )
+    );
+    res.json(teamTasks);
+  } else {
+    // If no members defined, return all tasks for this team directory
+    const teamTasks = allTasks.filter(task =>
+      task.owner === teamId ||
+      task.description?.includes(teamId) ||
+      task.subject?.includes(teamId)
+    );
+    res.json(teamTasks);
+  }
 });
 
 // GET messages for a specific team
