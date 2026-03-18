@@ -53,8 +53,7 @@ agent_todo/
 │   │   │   ├── tasks.ts       # 任务 API
 │   │   │   ├── messages.ts    # 消息 API
 │   │   │   └── data.ts        # 数据 API (团队、任务、消息)
-│   │   ├── fileWatcher.ts     # 文件监听器
-│   │   └── simulator.ts       # Agent 对话模拟器
+│   │   └── fileWatcher.ts     # 文件监听器
 │   └── package.json
 ├── shared/                   # 共享类型定义
 │   └── types.ts
@@ -136,20 +135,9 @@ npm run dev:frontend  # 前端开发服务器 (端口 5173)
 | message_received | 收到新消息 |
 | team_updated | 团队配置更新 |
 
-## Agent 模拟器
-
-内置的 Agent 对话模拟器会模拟多个 Agent 之间的对话:
-
-- **team-lead**: 团队负责人 (蓝色)
-- **backend-dev**: 后端开发 (绿色)
-- **frontend-dev**: 前端开发 (黄色)
-- **tester**: 测试人员 (红色)
-
-模拟器每 5 秒发送一条消息，模拟真实的协作场景。
-
 ## 真实集成
 
-应用可以监听实际的 `~/.claude/teams/` 和 `~/.claude/tasks/` 目录，显示真实的 Agent Teams 通信。如果目录不存在，将自动使用模拟模式。
+应用监听实际的 `~/.claude/teams/` 和 `~/.claude/tasks/` 目录，显示真实的 Agent Teams 通信。通过文件监听器实时监听到文件变化并广播消息。
 
 ### 团队结构
 
